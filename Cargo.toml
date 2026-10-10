@@ -1,0 +1,12 @@
+[package]
+name = "orderbook"
+version = "0.1.0"
+edition = "2021"
+description = "A price-time priority limit order book (M1: core engine, no I/O)"
+license = "MIT"
+
+[dependencies]
+# M1 intentionally has zero dependencies: std only.
+
+[profile.release]
+debug = true   # keep symbols for profiling in M3
