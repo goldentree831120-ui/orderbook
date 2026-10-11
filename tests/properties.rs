@@ -323,6 +323,24 @@ proptest! {
         check_sequence(&ops)?;
     }
 
+    /// Many orders at ONE price, most of them cancelled from the middle and back, then more
+    /// orders, more cancels and a sweep. Forces tombstones and level compaction (M3) through
+    /// the differential check against the reference.
+    #[test]
+    fn heavy_cancels_on_one_level(
+        n in 40usize..300,
+        cancel_mask in prop::collection::vec(any::<bool>(), 300),
+        extra in prop::collection::vec(op(), 0..60),
+        sweep in 1u64..5_000,
+    ) {
+        let mut ops: Vec<Op> = (0..n).map(|_| Op::Limit { side: Side::Sell, price: 100, qty: 3 }).collect();
+        // Op::Cancel picks ids[pick % len]; ids are 1..=n in order, so pick = i cancels id i+1.
+        ops.extend((1..n).filter(|&i| cancel_mask[i]).map(|i| Op::Cancel { pick: i }));
+        ops.extend(extra);
+        ops.push(Op::Market { side: Side::Buy, qty: sweep });
+        check_sequence(&ops)?;
+    }
+
     /// A trade always prints at the maker's price, and never outside the taker's limit.
     #[test]
     fn trades_respect_limit_and_print_at_maker_price(ops in prop::collection::vec(op(), 1..150)) {
