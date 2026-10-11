@@ -191,24 +191,34 @@ git checkout main               # optimised engine
 ./scripts/bench.sh --baseline before     # criterion prints the % change per benchmark
 ```
 
-### Results (fill in from YOUR machine only)
+### Results
 
-Hardware: _paste the header `bench.sh` prints (CPU, rustc, commit)_
+Measured on my laptop: **Intel Core i5-10210U @ 1.60 GHz, WSL2 Ubuntu, rustc 1.99.0**, criterion
+defaults (100 samples), laptop on mains power. "Before" = commit `3a9e152` (M1 engine),
+"after" = M3 engine. Before is derived from criterion's median after-time and median change.
 
-| Benchmark | Before | After | Change |
+| Benchmark | Before | After | Change (95% CI) |
 |---|---|---|---|
-| cancel_middle_of_level/10 | | | |
-| cancel_middle_of_level/1000 | | | |
-| cancel_middle_of_level/10000 | | | |
-| market_order_sweep/100 | | | |
-| mixed_flow/10k_ops | | | |
+| cancel_middle_of_level/100 | ~460 ns | 208 ns | −54.8% [−58.7, −50.8] |
+| cancel_middle_of_level/1000 | ~3.67 µs | 452 ns | −87.7% [−89.4, −85.8] |
+| cancel_middle_of_level/10000 | ~33.2 µs | 782 ns | −97.6% [−97.8, −97.3] |
+| market_order_sweep/1 | ~1.23 µs | 1.17 µs | −4.7% [−7.0, −2.4] |
+| market_order_sweep/10 | ~12.0 µs | 10.8 µs | −9.8% [−14.9, −4.8] |
+| market_order_sweep/100 | ~96.6 µs | 102 µs | +5.4% [−0.8, +12.8], p = 0.15: no significant change |
+| mixed_flow/10k_ops | ~3.09 ms | 3.35 ms | **+8.2% [+3.5, +13.4]: slower** |
+| insert_resting_limit/*, cancel/10 | | | not captured in this run |
 
-What to expect (from a sanity run on a shared cloud VM, not reported as results): cancel
-went from growing linearly with k to growing only slowly. It still rises a little with k,
-probably from cache misses in a larger book, but no longer from scanning. Insert and match
-were unchanged within noise (that VM showed ±10% run-to-run noise, up to 25% once).
-`mixed_flow` didn't improve: its levels are shallow, so there was no long scan to remove.
-**The optimisation only pays off when levels are deep.** That is the honest summary.
+**Reading it honestly:**
+- Cancel went from growing linearly with orders per level (~460 ns → ~33 µs as k goes
+  100 → 10,000) to growing slowly (208 → 782 ns). At 10,000 orders it's ~42× faster. It
+  still rises with k; the likely cause is cache misses in a bigger book, not scanning.
+- The realistic mixed workload got **~8% slower**. Its levels are shallow, so there was no
+  long scan to remove, and every operation now pays for slot bookkeeping and tombstone checks.
+- So this is a trade: it is worth it if the venue has deep levels with heavy cancelling
+  (typical of market makers), and not worth it for a thin book. A production engine would
+  measure its real order flow before choosing.
+- Sweeps improving 5–10% is within what I'd expect from noise plus layout changes; I don't
+  claim it as an effect of the optimisation.
 
 ### Correctness of the optimisation
 
