@@ -1,0 +1,12 @@
+# A small session to show the replay format. Price in ticks, qty in lots.
+limit 1 sell 101 5      # rests: best ask 101
+limit 2 sell 102 3
+limit 3 sell 101 2      # queues BEHIND order 1 at 101 (time priority)
+limit 4 buy 99 4        # rests: best bid 99
+limit 5 buy 102 9       # sweeps 101 (1 then 3), then 2 lots of order 2 at 102
+cancel 4                # bid at 99 leaves the book
+market 6 sell 10        # no bids left: fully cancelled for lack of liquidity
+limit 7 buy 100 6
+cancel 4                # already gone: rejected, unknown id
+limit 7 buy 100 1       # duplicate id: rejected
+market 8 sell 4         # fills 4 of order 7 at 100

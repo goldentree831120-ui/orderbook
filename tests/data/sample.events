@@ -1,0 +1,21 @@
+0 accepted id=1 sell limit@101 qty=5 ts=0
+0 rested id=1 sell price=101 qty=5
+1 accepted id=2 sell limit@102 qty=3 ts=1
+1 rested id=2 sell price=102 qty=3
+2 accepted id=3 sell limit@101 qty=2 ts=2
+2 rested id=3 sell price=101 qty=2
+3 accepted id=4 buy limit@99 qty=4 ts=3
+3 rested id=4 buy price=99 qty=4
+4 accepted id=5 buy limit@102 qty=9 ts=4
+4 trade maker=1 taker=5 buy price=101 qty=5
+4 trade maker=3 taker=5 buy price=101 qty=2
+4 trade maker=2 taker=5 buy price=102 qty=2
+5 cancelled id=4 remaining=4 reason=user
+6 accepted id=6 sell market qty=10 ts=5
+6 cancelled id=6 remaining=10 reason=no-liquidity
+7 accepted id=7 buy limit@100 qty=6 ts=6
+7 rested id=7 buy price=100 qty=6
+8 rejected id=4 reason=unknown-id
+9 rejected id=7 reason=duplicate-id
+10 accepted id=8 sell market qty=4 ts=7
+10 trade maker=7 taker=8 sell price=100 qty=4

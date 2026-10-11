@@ -218,3 +218,40 @@ compaction) on top of the M2 properties and the reference-model comparison.
 to renumber slots", "tombstone left at the front"). All 6 are caught; see
 `docs/mutation-report.txt`. One planted bug (LIFO matching) makes the engine loop forever, so
 the script treats a run over 120 s as caught.
+
+## 8. M4: deterministic replay
+
+**Why:** an exchange must be able to rebuild its book after a crash, settle disputes ("show me
+why my order didn't fill"), and prove a new engine version behaves exactly like the old one.
+All three need: same input log, same output, always.
+
+**Log format** (`examples/sample.log`): one command per line, `limit <id> <side> <price> <qty>`,
+`market <id> <side> <qty>`, `cancel <id>`, with `#` comments. It's plain text, so a log can be
+read, diffed and hand-written. Bad input stops at the first error and names the line.
+
+**Output:** a canonical event log (one event per line, prefixed by the index of the command
+that caused it), a 64-bit FNV-1a digest of the events and one of the final book. The digests are
+for quick comparison, not security.
+
+**Why it is deterministic:**
+- "time" is the engine's sequence number, not a clock;
+- integers only, no floating point;
+- no output depends on `HashMap` iteration order. The order index is a `HashMap`, and Rust
+  seeds its hasher randomly *per process*, so a bug that leaked hash order into the output
+  would make two runs of the same binary disagree.
+
+**Tests** (`tests/replay.rs`):
+
+| Test | What it proves |
+|---|---|
+| `golden_sample_log` | The hand-checked sample produces exactly `tests/data/sample.events`; any behaviour change shows up as a diff |
+| `same_log_twice_same_everything` | 20,000 random commands, replayed twice: identical events and digests |
+| `separate_processes_agree` | The real binary run twice as separate processes gives identical output: the random hash seed doesn't leak |
+| `split_replay_equals_full_replay` | Replaying in two halves (snapshot, then continue) equals replaying in one go, at 6 split points |
+| `replay_matches_driving_the_engine_directly` | The replay layer adds nothing and drops nothing |
+| `log_format_round_trips`, `parse_errors_name_the_line`, `comments_and_short_sides_are_accepted` | The format |
+| `cli_check_detects_tampered_event_log` | `--check` finds the first changed event and exits 1 |
+
+Not covered (honest list): logs aren't versioned or checksummed per line; there is no
+snapshot file format (split replay keeps the book in memory); ids must be unique for the whole
+log, as in the engine.

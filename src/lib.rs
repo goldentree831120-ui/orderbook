@@ -12,6 +12,7 @@
 //! ```
 
 pub mod book;
+pub mod replay;
 pub mod types;
 
 pub use book::{Level, OrderBook};
