@@ -1,0 +1,4 @@
+caught    LIFO instead of FIFO within a level   (deep_queues_then_sweep random_sequences_hold_every_invariant )
+caught    buy limit excludes its own price   (random_sequences_hold_every_invariant )
+caught    trade prints at taker limit   (random_sequences_hold_every_invariant )
+caught    cancel forgets the cached level total   (random_sequences_hold_every_invariant )

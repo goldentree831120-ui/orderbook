@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b377a5124dd027132f6d7f8ec95da4a343ef01642e9388df556c0ffbc902f7bb # shrinks to n = 4, qty = 1, sweep = 3, side = Buy
+cc 04649be18e758c66195a4554852586866670e77d2d78947f35bad15650eed65b # shrinks to ops = [Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Market { side: Buy, qty: 1 }, Limit { side: Sell, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }, Limit { side: Buy, price: 95, qty: 1 }]

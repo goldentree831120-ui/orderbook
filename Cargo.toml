@@ -10,3 +10,6 @@ license = "MIT"
 
 [profile.release]
 debug = true   # keep symbols for profiling in M3
+
+[dev-dependencies]
+proptest = "1"
