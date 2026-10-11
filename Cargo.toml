@@ -18,3 +18,11 @@ proptest = "1"
 [[bench]]
 name = "engine"
 harness = false
+
+# The property tests run hundreds of thousands of operations. Unoptimised (the default
+# for `cargo test`) heavy_cancels_on_one_level took ~150 s on a laptop; optimised, seconds.
+[profile.test]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2   # proptest/criterion themselves
