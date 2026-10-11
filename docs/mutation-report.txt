@@ -1,0 +1,6 @@
+caught    LIFO instead of FIFO within a level   (engine hung: timeout)
+caught    buy limit excludes its own price   (heavy_cancels_on_one_level random_sequences_hold_every_invariant )
+caught    trade prints at taker limit   (heavy_cancels_on_one_level random_sequences_hold_every_invariant )
+caught    cancel forgets the cached level total   (2 property tests failed)
+caught    compaction forgets to renumber slots   (heavy_cancels_on_one_level )
+caught    cancel leaves tombstone at the front   (random_sequences_hold_every_invariant heavy_cancels_on_one_level )

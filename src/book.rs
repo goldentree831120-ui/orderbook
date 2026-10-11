@@ -5,10 +5,17 @@
 //! ```text
 //!  bids: BTreeMap<Price, Level>   ascending; best bid = LAST key
 //!  asks: BTreeMap<Price, Level>   ascending; best ask = FIRST key
-//!  index: HashMap<OrderId, (Side, Price)>   where each resting order lives
+//!  index: HashMap<OrderId, (Side, Price, Slot)>   where each resting order lives
 //!
-//!  Level { orders: VecDeque<Order> (FIFO, oldest at front), total_qty }
+//!  Level { orders: VecDeque<Order> (FIFO, oldest at front), head, live, total_qty }
 //! ```
+//!
+//! M3 optimisation: O(1) cancel inside a level. Each order gets a `Slot`, its absolute
+//! position in the level's queue (slot of orders[0] is `head`). Cancel jumps straight to
+//! `orders[slot - head]` and turns the order into a *tombstone* (qty = 0) instead of
+//! removing it from the middle of the VecDeque, which was an O(k) scan plus shift.
+//! Tombstones are dropped when they reach the front, and a level compacts itself when
+//! more than half its entries are dead, so memory stays bounded.
 //!
 //! See DESIGN.md for why these structures and the cost of every operation.
 
@@ -16,26 +23,73 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use crate::types::*;
 
+/// Absolute position of an order in its level's queue. Never reused within a level.
+type Slot = u64;
+
+/// Compact a level when it holds more dead entries than this AND more dead than live.
+const COMPACT_MIN_DEAD: usize = 32;
+
 /// All resting orders at one price, in arrival order.
+///
+/// Invariant: `orders.front()`, if any, is live (qty > 0). Tombstones (qty == 0) may sit
+/// in the middle or back, never at the front, so matching never has to skip them.
 #[derive(Debug, Default, Clone)]
 pub struct Level {
     orders: VecDeque<Order>,
-    /// Cached sum of `orders[i].qty`, so depth queries are O(1) per level.
+    /// Slot number of `orders[0]`.
+    head: Slot,
+    /// Number of live (non-tombstone) orders.
+    live: usize,
+    /// Cached sum of live orders' qty, so depth queries are O(1) per level.
     total_qty: Qty,
 }
 
 impl Level {
+    /// Live orders, oldest first.
     pub fn orders(&self) -> impl Iterator<Item = &Order> {
-        self.orders.iter()
+        self.orders.iter().filter(|o| o.qty > 0)
     }
     pub fn total_qty(&self) -> Qty {
         self.total_qty
     }
     pub fn len(&self) -> usize {
-        self.orders.len()
+        self.live
     }
     pub fn is_empty(&self) -> bool {
-        self.orders.is_empty()
+        self.live == 0
+    }
+
+    fn push(&mut self, order: Order) -> Slot {
+        let slot = self.head + self.orders.len() as Slot;
+        self.total_qty += order.qty;
+        self.live += 1;
+        self.orders.push_back(order);
+        slot
+    }
+
+    fn get_mut(&mut self, slot: Slot) -> Option<&mut Order> {
+        let i = slot.checked_sub(self.head)? as usize;
+        self.orders.get_mut(i).filter(|o| o.qty > 0)
+    }
+
+    /// Drop the (filled) front order and any tombstones behind it.
+    fn pop_front(&mut self) -> Option<Order> {
+        let o = self.orders.pop_front()?;
+        self.head += 1;
+        self.trim_front();
+        Some(o)
+    }
+
+    fn trim_front(&mut self) {
+        while self.orders.front().is_some_and(|o| o.qty == 0) {
+            self.orders.pop_front();
+            self.head += 1;
+        }
+    }
+
+    fn should_compact(&self) -> bool {
+        let dead = self.orders.len() - self.live;
+        dead > COMPACT_MIN_DEAD && dead > self.live
     }
 }
 
@@ -44,7 +98,7 @@ pub struct OrderBook {
     bids: BTreeMap<Price, Level>,
     asks: BTreeMap<Price, Level>,
     /// Resting orders only. Filled or cancelled orders are removed.
-    index: HashMap<OrderId, (Side, Price)>,
+    index: HashMap<OrderId, (Side, Price, Slot)>,
     /// Every id ever accepted, so ids can never be reused. (Grows without bound;
     /// a production engine would scope ids per session/day.)
     seen_ids: HashSet<OrderId>,
@@ -124,36 +178,44 @@ impl OrderBook {
 
     /// Cancel a resting order. Unknown, already-filled, or already-cancelled ids
     /// are rejected rather than silently ignored.
+    ///
+    /// Cost: O(1) hash lookup + O(log P) to find the level + O(1) to tombstone the order
+    /// (amortised O(1) extra when the level compacts). Was O(k) before M3.
     pub fn cancel(&mut self, id: OrderId) -> Event {
-        let Some((side, price)) = self.index.remove(&id) else {
+        let Some((side, price, slot)) = self.index.remove(&id) else {
             return Event::Rejected {
                 id,
                 reason: RejectReason::UnknownOrderId,
             };
         };
 
-        let book = self.side_mut(side);
+        let (book, index) = match side {
+            Side::Buy => (&mut self.bids, &mut self.index),
+            Side::Sell => (&mut self.asks, &mut self.index),
+        };
         let level = book
             .get_mut(&price)
             .expect("index points at a level that does not exist");
+        let order = level
+            .get_mut(slot)
+            .expect("index points at a slot that is not a live order");
 
-        // Linear scan inside one price level: O(k) where k = orders at this price.
-        // This is the operation M3 will optimise.
-        let pos = level
-            .orders
-            .iter()
-            .position(|o| o.id == id)
-            .expect("index points at an order that is not in its level");
-        let order = level.orders.remove(pos).expect("position is in bounds");
-        level.total_qty -= order.qty;
+        // Tombstone in place: no search, no shifting.
+        let remaining = order.qty;
+        order.qty = 0;
+        level.total_qty -= remaining;
+        level.live -= 1;
+        level.trim_front();
 
-        if level.orders.is_empty() {
+        if level.is_empty() {
             book.remove(&price);
+        } else if level.should_compact() {
+            Self::compact(level, index);
         }
 
         Event::Cancelled {
             id,
-            remaining: order.qty,
+            remaining,
             reason: CancelReason::UserRequested,
         }
     }
@@ -199,14 +261,14 @@ impl OrderBook {
         self.side_ref(side).get(&price)
     }
 
-    /// Look up a resting order by id.
+    /// Look up a resting order by id. O(1) + O(log P).
     pub fn order(&self, id: OrderId) -> Option<&Order> {
-        let (side, price) = self.index.get(&id)?;
-        self.side_ref(*side)
-            .get(price)?
+        let (side, price, slot) = self.index.get(&id)?;
+        let level = self.side_ref(*side).get(price)?;
+        level
             .orders
-            .iter()
-            .find(|o| o.id == id)
+            .get(slot.checked_sub(level.head)? as usize)
+            .filter(|o| o.qty > 0)
     }
 
     /// Number of resting orders.
@@ -238,24 +300,32 @@ impl OrderBook {
         let mut counted = 0usize;
         for (side, book) in [(Side::Buy, &self.bids), (Side::Sell, &self.asks)] {
             for (price, level) in book {
+                assert!(level.live > 0, "empty level left at {side:?} {price}");
                 assert!(
-                    !level.orders.is_empty(),
-                    "empty level left at {side:?} {price}"
+                    level.orders.front().is_some_and(|o| o.qty > 0),
+                    "tombstone at the front of {side:?} {price}"
                 );
-                let sum: Qty = level.orders.iter().map(|o| o.qty).sum();
+                assert_eq!(
+                    level.orders().count(),
+                    level.live,
+                    "live count wrong at {side:?} {price}"
+                );
+                let sum: Qty = level.orders().map(|o| o.qty).sum();
                 assert_eq!(
                     sum, level.total_qty,
                     "cached total wrong at {side:?} {price}"
                 );
 
                 let mut last_ts = None;
-                for o in &level.orders {
-                    assert!(o.qty > 0, "zero-qty order {} resting", o.id);
+                for (i, o) in level.orders.iter().enumerate() {
+                    if o.qty == 0 {
+                        continue; // tombstone
+                    }
                     assert_eq!(o.side, side, "order {} on wrong side", o.id);
                     assert_eq!(o.price, *price, "order {} at wrong level", o.id);
                     assert_eq!(
                         self.index.get(&o.id),
-                        Some(&(side, *price)),
+                        Some(&(side, *price, level.head + i as Slot)),
                         "index mismatch for {}",
                         o.id
                     );
@@ -329,7 +399,7 @@ impl OrderBook {
 
             let level = book.get_mut(&price).expect("key just observed");
 
-            // Fill against this level, oldest order first.
+            // Fill against this level, oldest order first. The front is always live.
             while qty > 0 {
                 let Some(maker) = level.orders.front_mut() else {
                     break;
@@ -349,12 +419,14 @@ impl OrderBook {
                 }));
 
                 if maker.qty == 0 {
-                    let done = level.orders.pop_front().expect("front exists");
-                    index.remove(&done.id);
+                    let done_id = maker.id;
+                    level.live -= 1;
+                    level.pop_front(); // also drops tombstones that are now at the front
+                    index.remove(&done_id);
                 }
             }
 
-            if level.orders.is_empty() {
+            if level.is_empty() {
                 book.remove(&price);
             }
         }
@@ -363,10 +435,20 @@ impl OrderBook {
     }
 
     fn rest(&mut self, order: Order) {
-        self.index.insert(order.id, (order.side, order.price));
-        let level = self.side_mut(order.side).entry(order.price).or_default();
-        level.total_qty += order.qty;
-        level.orders.push_back(order);
+        let (id, side, price) = (order.id, order.side, order.price);
+        let slot = self.side_mut(side).entry(price).or_default().push(order);
+        self.index.insert(id, (side, price, slot));
+    }
+
+    /// Remove tombstones from a level and renumber the live orders' slots. O(k), but only
+    /// runs once dead entries outnumber live ones, so it is amortised O(1) per cancel.
+    fn compact(level: &mut Level, index: &mut HashMap<OrderId, (Side, Price, Slot)>) {
+        level.orders.retain(|o| o.qty > 0);
+        for (i, o) in level.orders.iter().enumerate() {
+            if let Some(entry) = index.get_mut(&o.id) {
+                entry.2 = level.head + i as Slot;
+            }
+        }
     }
 
     fn side_mut(&mut self, side: Side) -> &mut BTreeMap<Price, Level> {

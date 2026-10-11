@@ -91,20 +91,18 @@ levels it fully consumes, **n** = levels requested.
 |---|---|---|
 | Limit order that rests without matching | **O(log P)** | best-price check O(log P) + `entry()` O(log P) + `push_back` O(1) + index insert O(1) |
 | Limit/market order that matches | **O(m + (L+1)·log P)** | each fill O(1); each level visited costs one best-price lookup + `get_mut` O(log P); each emptied level `remove` O(log P) |
-| Cancel | **O(log P + k)** | index O(1), find level O(log P), linear scan for the id in the level O(k), `VecDeque::remove` O(min(i, k−i)) |
+| Cancel (M1) | O(log P + k) | index O(1), find level O(log P), linear scan for the id in the level O(k), `VecDeque::remove` O(min(i, k−i)) |
+| **Cancel (M3)** | **O(log P)** amortised | index O(1) gives the order's slot, find level O(log P), tombstone in O(1); compaction amortised O(1) |
 | Best bid / ask | O(log P) | B-tree spine walk |
 | Depth of n levels | O(log P + n) | |
-| Lookup order by id | O(log P + k) | |
+| Lookup order by id | O(log P) | slot from the index (M3) |
 
 Matching cost is proportional to the work actually done (fills), which is the
 best you can do: every fill must emit a trade.
 
-**The weak spot is cancel's O(k) scan.** In real markets most orders are
+**The weak spot was cancel's O(k) scan.** In real markets most orders are
 cancelled, not filled (cancel-to-trade ratios of 10:1 or higher are common),
-and popular price levels can hold thousands of orders. M3's optimisation will
-target this: give each order a stable slot in a slab and link a level's orders
-as an intrusive doubly-linked list, making cancel O(1) after the lookup.
-Before changing it, M3 will benchmark it so the before/after is real.
+and popular price levels can hold thousands of orders. M3 fixed it; see §7.
 
 ## 4. Event model
 
@@ -151,3 +149,72 @@ already checks this over 5,000 random operations as a preview.
   `RefCell` or cloning.
 - **Rejected orders don't consume a `Seq`,** so a replayed log with the same
   valid orders always yields the same timestamps.
+
+## 7. M3: benchmarks and the cancel optimisation
+
+### What changed
+
+Each resting order gets a **slot**: its absolute position in its level's queue
+(`orders[0]` has slot `head`). The index stores `(side, price, slot)`, so cancel jumps
+straight to `orders[slot - head]` and marks the order as a **tombstone** (qty = 0) instead
+of removing it from the middle of the `VecDeque`.
+
+- Tombstones are dropped as soon as they reach the front, so the front is always live and
+  matching never skips anything.
+- A level **compacts** (rebuilds its queue without tombstones and renumbers slots) when it
+  has more than 32 dead entries *and* more dead than live. That keeps memory bounded and
+  the cost amortised O(1) per cancel.
+
+I chose this over the slab + intrusive linked list planned in M1. It keeps orders contiguous
+in the `VecDeque` (cache-friendly matching), needs no `unsafe` and no second allocation per
+order, and the change stays inside `Level`.
+
+### Benchmarks (`benches/engine.rs`, criterion)
+
+| Group | Varies | Expected shape |
+|---|---|---|
+| `insert_resting_limit/{10,1000,10000}` | price levels P | ~log P |
+| `cancel_middle_of_level/{10,100,1000,10000}` | orders at one level k | O(k) before, ~flat after |
+| `market_order_sweep/{1,10,100}` | levels swept L | linear in L |
+| `mixed_flow/10k_ops` | realistic mix of limits, markets and cancels | regression check |
+
+Each benchmark builds its book in untimed setup and returns it so the drop isn't timed.
+(The first version timed the destructor of a 10,000-level book, which made insert look
+O(P). The lesson: check that benchmark scaling matches the complexity you expect.)
+
+### Reproduce before/after on your machine
+
+```bash
+git checkout 3a9e152            # M3 benchmarks, ORIGINAL engine
+./scripts/bench.sh --save-baseline before
+git checkout main               # optimised engine
+./scripts/bench.sh --baseline before     # criterion prints the % change per benchmark
+```
+
+### Results (fill in from YOUR machine only)
+
+Hardware: _paste the header `bench.sh` prints (CPU, rustc, commit)_
+
+| Benchmark | Before | After | Change |
+|---|---|---|---|
+| cancel_middle_of_level/10 | | | |
+| cancel_middle_of_level/1000 | | | |
+| cancel_middle_of_level/10000 | | | |
+| market_order_sweep/100 | | | |
+| mixed_flow/10k_ops | | | |
+
+What to expect (from a sanity run on a shared cloud VM, not reported as results): cancel
+went from growing linearly with k to growing only slowly. It still rises a little with k,
+probably from cache misses in a larger book, but no longer from scanning. Insert and match
+were unchanged within noise (that VM showed ±10% run-to-run noise, up to 25% once).
+`mixed_flow` didn't improve: its levels are shallow, so there was no long scan to remove.
+**The optimisation only pays off when levels are deep.** That is the honest summary.
+
+### Correctness of the optimisation
+
+`tests/properties.rs` adds `heavy_cancels_on_one_level` (deep queue, many cancels, forces
+compaction) on top of the M2 properties and the reference-model comparison.
+`scripts/mutation-check.sh` plants 6 bugs, including 2 specific to slots ("compaction forgets
+to renumber slots", "tombstone left at the front"). All 6 are caught; see
+`docs/mutation-report.txt`. One planted bug (LIFO matching) makes the engine loop forever, so
+the script treats a run over 120 s as caught.

@@ -29,17 +29,21 @@ fn book_with_asks(levels: u64, per_level: u64) -> (OrderBook, u64) {
 fn insert(c: &mut Criterion) {
     let mut g = c.benchmark_group("insert_resting_limit");
     for levels in [10u64, 1_000, 10_000] {
-        g.bench_with_input(BenchmarkId::from_parameter(levels), &levels, |bch, &levels| {
-            bch.iter_batched(
-                || book_with_asks(levels, 1),
-                // A bid below every ask: no match, just rests (new level).
-                |(mut b, id)| {
-                    let ev = b.submit(OrderRequest::limit(id, Side::Buy, 500, 10));
-                    (b, ev) // return the book: criterion drops outputs OUTSIDE the timed region
-                },
-                BatchSize::LargeInput,
-            )
-        });
+        g.bench_with_input(
+            BenchmarkId::from_parameter(levels),
+            &levels,
+            |bch, &levels| {
+                bch.iter_batched(
+                    || book_with_asks(levels, 1),
+                    // A bid below every ask: no match, just rests (new level).
+                    |(mut b, id)| {
+                        let ev = b.submit(OrderRequest::limit(id, Side::Buy, 500, 10));
+                        (b, ev) // return the book: criterion drops outputs OUTSIDE the timed region
+                    },
+                    BatchSize::LargeInput,
+                )
+            },
+        );
     }
     g.finish();
 }
@@ -47,17 +51,21 @@ fn insert(c: &mut Criterion) {
 fn cancel(c: &mut Criterion) {
     let mut g = c.benchmark_group("cancel_middle_of_level");
     for per_level in [10u64, 100, 1_000, 10_000] {
-        g.bench_with_input(BenchmarkId::from_parameter(per_level), &per_level, |bch, &k| {
-            bch.iter_batched(
-                || book_with_asks(1, k),
-                // Cancel the order in the middle of the single level's queue.
-                |(mut b, _)| {
-                    let ev = b.cancel(k / 2 + 1);
-                    (b, ev)
-                },
-                BatchSize::LargeInput,
-            )
-        });
+        g.bench_with_input(
+            BenchmarkId::from_parameter(per_level),
+            &per_level,
+            |bch, &k| {
+                bch.iter_batched(
+                    || book_with_asks(1, k),
+                    // Cancel the order in the middle of the single level's queue.
+                    |(mut b, _)| {
+                        let ev = b.cancel(k / 2 + 1);
+                        (b, ev)
+                    },
+                    BatchSize::LargeInput,
+                )
+            },
+        );
     }
     g.finish();
 }
@@ -67,16 +75,20 @@ fn match_sweep(c: &mut Criterion) {
     for levels in [1u64, 10, 100] {
         // 10 orders per level, qty 10 each: sweeping L levels = 10*L fills.
         g.throughput(Throughput::Elements(levels * 10));
-        g.bench_with_input(BenchmarkId::from_parameter(levels), &levels, |bch, &levels| {
-            bch.iter_batched(
-                || book_with_asks(levels, 10),
-                |(mut b, id)| {
-                    let ev = b.submit(OrderRequest::market(id, Side::Buy, levels * 100));
-                    (b, ev)
-                },
-                BatchSize::LargeInput,
-            )
-        });
+        g.bench_with_input(
+            BenchmarkId::from_parameter(levels),
+            &levels,
+            |bch, &levels| {
+                bch.iter_batched(
+                    || book_with_asks(levels, 10),
+                    |(mut b, id)| {
+                        let ev = b.submit(OrderRequest::market(id, Side::Buy, levels * 100));
+                        (b, ev)
+                    },
+                    BatchSize::LargeInput,
+                )
+            },
+        );
     }
     g.finish();
 }
@@ -118,16 +130,26 @@ enum MixOp {
 fn mixed_ops(n: usize, seed: u64) -> Vec<MixOp> {
     let mut s = seed;
     let mut rnd = move || {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         s >> 33
     };
     let mut out = Vec::with_capacity(n);
     for id in 1..=n as u64 {
-        let side = if rnd() % 2 == 0 { Side::Buy } else { Side::Sell };
+        let side = if rnd() % 2 == 0 {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
         out.push(match rnd() % 10 {
             0..=5 => {
                 // Bids at 990..1000, asks at 1000..1010: overlapping so some cross.
-                let price = if side == Side::Buy { 990 + rnd() % 11 } else { 1000 + rnd() % 11 };
+                let price = if side == Side::Buy {
+                    990 + rnd() % 11
+                } else {
+                    1000 + rnd() % 11
+                };
                 MixOp::Submit(OrderRequest::limit(id, side, price, 1 + rnd() % 20))
             }
             6..=8 => MixOp::Cancel(1 + rnd() % id),
