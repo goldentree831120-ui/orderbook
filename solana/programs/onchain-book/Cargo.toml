@@ -1,0 +1,38 @@
+[package]
+name = "onchain-book"
+version = "0.1.0"
+description = "P1 M5: the order book as a Solana program (one market account, fixed capacity)"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "onchain_book"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+# Pinned to the exact version of the Anchor CLI used to build it (1.1.2).
+anchor-lang = "=1.1.2"
+bytemuck = { version = "1", features = ["min_const_generics"] }
+
+[dev-dependencies]
+litesvm = "0.10.0"
+solana-message = "3.0.1"
+solana-transaction = "3.0.2"
+solana-signer = "3.0.0"
+solana-keypair = "3.0.1"
+base64 = "0.22"
+# The off-chain M1-M4 engine, for the differential test.
+orderbook = { path = "../../.." }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

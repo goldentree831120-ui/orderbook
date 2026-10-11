@@ -2,7 +2,7 @@
 
 A price-time priority limit order book in Rust. Pure library, no I/O, no runtime dependencies.
 
-Status: **M1** core engine, **M2** property tests, **M3** benchmarks + O(1) cancel, **M4** deterministic replay. Next: M5 Solana port.
+Status: **M1** core engine, **M2** property tests, **M3** benchmarks + O(1) cancel, **M4** deterministic replay, **M5** Solana/Anchor program in [`solana/`](solana/README.md). Next: M6 TypeScript client + final README.
 Design rationale and per-operation complexity: [DESIGN.md](DESIGN.md).
 
 ```sh

@@ -1,0 +1,20 @@
+skip_local_validator = true
+
+[toolchain]
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+onchain_book = "AgJTtauLP5QiYBLEvZGrnyPsu2mwb85Eo18d6rZ2Gg37"
+
+[programs.devnet]
+onchain_book = "AgJTtauLP5QiYBLEvZGrnyPsu2mwb85Eo18d6rZ2Gg37"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
