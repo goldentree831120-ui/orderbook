@@ -5,7 +5,7 @@
 //!
 //! 1. the book is never crossed (best bid < best ask);
 //! 2. quantity is conserved, globally and for each individual order:
-//!        submitted = filled + resting + cancelled
+//!    submitted = filled + resting + cancelled
 //! 3. FIFO within a price level, plus structural consistency (OrderBook::assert_invariants);
 //! 4. the engine produces exactly the same events as a deliberately naive reference
 //!    implementation (differential testing). The reference finds the best order by scanning
