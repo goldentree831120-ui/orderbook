@@ -1,14 +1,4 @@
-//! M3 benchmarks. Run everything with `./scripts/bench.sh` (prints hardware info first).
-//!
-//! Each benchmark builds its book in an untimed setup (`iter_batched`), then times ONE
-//! operation, so we measure the operation and not the setup. The routine RETURNS the book:
-//! criterion drops returned values after timing. (The first version let the book drop inside
-//! the routine, which timed the destructor of a 10,000-level book and made an O(log P) insert
-//! look O(P). Lesson: check that benchmark scaling matches the complexity you expect.) Book shapes are chosen to
-//! show how cost scales with the things the complexity analysis says matter:
-//!   insert  -> number of price levels P
-//!   cancel  -> orders at the same level k (the O(k) scan this milestone targets)
-//!   match   -> number of levels swept L
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use orderbook::{OrderBook, OrderRequest, Side};
 use std::hint::black_box;
